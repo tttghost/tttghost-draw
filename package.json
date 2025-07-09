@@ -1,11 +1,24 @@
 {
   "name": "jsdraw-signaling",
   "version": "1.0.0",
+  "description": "WebRTC signaling server for jsDraw",
   "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
   "dependencies": {
     "ws": "^8.13.0"
   },
-  "scripts": {
-    "start": "node server.js"
-  }
-}
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "webrtc",
+    "signaling",
+    "drawing",
+    "realtime"
+  ],
+  "author": "jsDraw Team",
+  "license": "MIT"
+} 
