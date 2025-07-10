@@ -4,21 +4,10 @@ const port = process.env.PORT || 3000;
 const server = http.createServer();
 const wss = new WebSocket.Server({ server });
 
-let clients = [];
+let rooms = {}; // { roomId: [ws1, ws2] }
 
 wss.on('connection', ws => {
-  if (clients.length >= 2) {
-    ws.send(JSON.stringify({ type: 'full' }));
-    ws.close();
-    return;
-  }
-
-  clients.push(ws);
-  console.log(`👤 클라이언트 연결됨 (현재 ${clients.length}명)`);
-
   ws.on('message', msg => {
-    console.log('📩 메시지 수신:', msg);
-
     let parsed;
     try {
       parsed = JSON.parse(msg);
@@ -27,29 +16,52 @@ wss.on('connection', ws => {
       return;
     }
 
-    // ✅ join 메시지 수신 처리
-    if (parsed.type === 'join') {
-      console.log(`✅ ${parsed.userId} 가 join 요청함`);
+    const { type, roomId, userId } = parsed;
 
-      if (clients.length === 2) {
-        console.log('🔔 두 명 연결됨 → 첫 번째 사용자에게 init-offer 전송');
-        clients[0].send(JSON.stringify({ type: 'init-offer' }));
+    if (type === 'join') {
+      if (!roomId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'roomId 누락' }));
+        return;
       }
-      return; // join 메시지는 브로드캐스트하지 않음
+
+      rooms[roomId] = rooms[roomId] || [];
+
+      if (rooms[roomId].length >= 2) {
+        ws.send(JSON.stringify({ type: 'full' }));
+        ws.close();
+        return;
+      }
+
+      ws.roomId = roomId;
+      rooms[roomId].push(ws);
+      console.log(`✅ ${userId} 가 방 "${roomId}"에 접속 (총 ${rooms[roomId].length}명)`);
+
+      if (rooms[roomId].length === 2) {
+        console.log(`🔔 "${roomId}" 방 인원 2명 도달 → offer 요청`);
+        rooms[roomId][0].send(JSON.stringify({ type: 'init-offer' }));
+      }
+      return;
     }
 
-    // 일반 메시지 (offer, answer, ice-candidate 등) → 상대방에게만 전달
-    wss.clients.forEach(client => {
-      if (client !== ws && client.readyState === WebSocket.OPEN) {
-        console.log('📤 메시지 전달 중');
-        client.send(msg);
-      }
-    });
+    // 메시지 브로드캐스트 (같은 방 내 상대방에게만)
+    if (ws.roomId && rooms[ws.roomId]) {
+      rooms[ws.roomId].forEach(client => {
+        if (client !== ws && client.readyState === WebSocket.OPEN) {
+          client.send(msg);
+        }
+      });
+    }
   });
 
   ws.on('close', () => {
-    console.log('❌ 클라이언트 연결 종료');
-    clients = clients.filter(client => client !== ws);
+    const roomId = ws.roomId;
+    if (roomId && rooms[roomId]) {
+      rooms[roomId] = rooms[roomId].filter(client => client !== ws);
+      if (rooms[roomId].length === 0) {
+        delete rooms[roomId]; // 아무도 없으면 방 제거
+      }
+      console.log(`❌ 클라이언트 연결 종료 → "${roomId}" 방 인원: ${rooms[roomId]?.length || 0}`);
+    }
   });
 });
 
