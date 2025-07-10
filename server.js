@@ -1,30 +1,30 @@
+// signaling-server.js
 const WebSocket = require('ws');
 const http = require('http');
 const port = process.env.PORT || 3000;
 const server = http.createServer();
 const wss = new WebSocket.Server({ server });
 
-let rooms = {}; // { roomId: [ws1, ws2] }
+const rooms = {}; // { roomId: [ws1, ws2] }
 
-wss.on('connection', ws => {
-  ws.on('message', msg => {
-    let parsed;
+wss.on('connection', (ws) => {
+  ws.on('message', (message) => {
+    let data;
     try {
-      parsed = JSON.parse(msg);
+      data = JSON.parse(message);
     } catch (e) {
-      console.log('⚠️ JSON 파싱 실패');
+      console.error('⚠️ JSON 파싱 실패:', message);
       return;
     }
 
-    const { type, roomId, userId } = parsed;
+    const { type, roomId, userId } = data;
+    if (!type || !roomId || !userId) {
+      console.warn('❌ 누락된 필드:', data);
+      return;
+    }
 
     if (type === 'join') {
-      if (!roomId) {
-        ws.send(JSON.stringify({ type: 'error', message: 'roomId 누락' }));
-        return;
-      }
-
-      rooms[roomId] = rooms[roomId] || [];
+      if (!rooms[roomId]) rooms[roomId] = [];
 
       if (rooms[roomId].length >= 2) {
         ws.send(JSON.stringify({ type: 'full' }));
@@ -33,39 +33,39 @@ wss.on('connection', ws => {
       }
 
       ws.roomId = roomId;
+      ws.userId = userId;
       rooms[roomId].push(ws);
-      console.log(`✅ ${userId} 가 방 "${roomId}"에 접속 (총 ${rooms[roomId].length}명)`);
+      console.log(`✅ ${userId} joined room "${roomId}" (${rooms[roomId].length}/2)`);
 
       if (rooms[roomId].length === 2) {
-        const first = rooms[roomId][0];
-        if (first.readyState === WebSocket.OPEN) {
-          console.log(`🔔 "${roomId}" 방 인원 2명 도달 → offer 요청`);
-          first.send(JSON.stringify({ type: 'init-offer' }));
-        } else {
-          console.log('⚠️ 첫 클라이언트가 비정상 상태');
+        const initiator = rooms[roomId][0];
+        if (initiator.readyState === WebSocket.OPEN) {
+          console.log(`🔔 Room "${roomId}" is full. Sending init-offer to ${initiator.userId}`);
+          initiator.send(JSON.stringify({ type: 'init-offer' }));
         }
       }
       return;
     }
 
-    // 메시지 브로드캐스트 (같은 방 내 상대방에게만)
-    if (ws.roomId && rooms[ws.roomId]) {
-      rooms[ws.roomId].forEach(client => {
-        if (client !== ws && client.readyState === WebSocket.OPEN) {
-          client.send(msg);
-        }
-      });
-    }
+    // relay to others in room
+    const clients = rooms[ws.roomId] || [];
+    clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
   });
 
   ws.on('close', () => {
     const roomId = ws.roomId;
     if (roomId && rooms[roomId]) {
       rooms[roomId] = rooms[roomId].filter(client => client !== ws);
+      console.log(`❌ ${ws.userId || 'unknown'} disconnected from room "${roomId}"`);
+
       if (rooms[roomId].length === 0) {
-        delete rooms[roomId]; // 아무도 없으면 방 제거
+        delete rooms[roomId];
+        console.log(`🧹 Room "${roomId}" deleted`);
       }
-      console.log(`❌ 클라이언트 연결 종료 → "${roomId}" 방 인원: ${rooms[roomId]?.length || 0}`);
     }
   });
 });
